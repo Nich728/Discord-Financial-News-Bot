@@ -1,0 +1,13 @@
+.env
+*.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+
+# Secrets / tokens — never commit these
+Discord Bot Token.txt
+*token*.txt
+*Token*.txt
+*secret*

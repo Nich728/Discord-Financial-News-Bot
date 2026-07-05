@@ -1,0 +1,8 @@
+discord.py>=2.4
+anthropic>=0.40
+yfinance>=0.2.40
+feedparser>=6.0
+httpx>=0.27
+APScheduler>=3.10
+python-dotenv>=1.0
+tradingview-ta>=3.3
