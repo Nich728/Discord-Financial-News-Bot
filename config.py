@@ -78,6 +78,25 @@ PREFILTER_KEYWORDS = (
     else _DEFAULT_KEYWORDS
 )
 
+# Blocklist: dropped even if a keyword matched. These are recurring
+# prediction/recommendation columns and listicles — published daily, never
+# actually market-moving, and they'd otherwise burn an LLM call every poll.
+_DEFAULT_BLOCK = [
+    # Indonesian daily columns
+    "prediksi", "rekomendasi saham", "rekomendasi teknikal", "saham pilihan",
+    # English equivalents
+    "stocks to watch", "stocks to buy", "best stocks", "top picks",
+    "price prediction", "technical analysis", "what to watch",
+    "things to know", "how to", "explainer",
+]
+
+_env_block = os.getenv("PREFILTER_BLOCK")
+PREFILTER_BLOCK = (
+    [k.strip().lower() for k in _env_block.split(",") if k.strip()]
+    if _env_block
+    else _DEFAULT_BLOCK
+)
+
 MARKETS = ("us", "id", "crypto")
 
 

@@ -35,8 +35,11 @@ Rate the market impact using this guide:
   sector or index.
 - "medium": notable single-company news, meaningful sector moves, or analyst
   actions with real consequences.
-- "low": routine updates, opinion/analysis pieces, minor announcements, rumors,
-  listicles, price recaps, promotional or how-to content.
+- "low": EVERYTHING ELSE — predictions, forecasts, price targets, stock
+  recommendations, analyst opinion, technical analysis, daily outlook or
+  "stocks to watch" columns, routine updates, minor announcements, rumors,
+  listicles, price recaps, promotional or how-to content. Commentary ABOUT
+  the market is not the same as an event that MOVES the market.
 
 Respond with ONLY a JSON object (no prose, no code fences) with these keys:
 - "summary": 1-2 sentence plain-English summary
@@ -147,7 +150,22 @@ def classify_batch(articles: list):
         lines.append(f"{i}. [{a.get('market', '')}] {a.get('title', '')} — {desc}")
     prompt = (
         "Rate the likely market impact of each numbered headline as "
-        '"high", "medium", or "low".\n\n'
+        '"high", "medium", or "low", using this guide:\n'
+        '- "high": ONLY events that have already happened and move markets — '
+        "macroeconomic data releases (CPI, GDP, jobs), central-bank/Fed rate "
+        "decisions, geopolitical shocks (war, strikes, sanctions), systemic "
+        "financial events, major regulatory rulings, or large-cap "
+        "earnings/M&A that move a whole sector or index.\n"
+        '- "medium": notable single-company news or sector moves that actually '
+        "occurred.\n"
+        '- "low": EVERYTHING ELSE. This includes predictions, forecasts, price '
+        "targets, stock recommendations, analyst opinion, technical analysis, "
+        "daily market outlook or 'stocks to watch' columns, routine price "
+        "recaps, listicles, how-to and explainer content, and rumors. "
+        "Commentary ABOUT the market is not the same as an event that MOVES "
+        "the market.\n\n"
+        "Be strict: most headlines are 'low'. If a headline only predicts, "
+        "recommends, or comments, it is 'low' no matter which assets it names.\n\n"
         + "\n".join(lines)
         + "\n\nRespond with ONLY a JSON array, one object per headline, reusing "
         'the same indices: [{"index": 0, "impact": "low"}, ...]'
