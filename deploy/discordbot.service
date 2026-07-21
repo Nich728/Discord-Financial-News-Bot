@@ -1,0 +1,34 @@
+# systemd unit for running the bot 24/7 on a Linux VPS.
+#
+# Install:
+#   sudo cp deploy/discordbot.service /etc/systemd/system/discordbot.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now discordbot
+#
+# Adjust User= and the two paths below if you deploy somewhere other than
+# /home/botuser/Discord-Financial-News-Bot.
+#
+# Secrets are NOT set here — the bot reads .env from WorkingDirectory via
+# python-dotenv, so keep .env next to bot.py (chmod 600) and out of git.
+
+[Unit]
+Description=Discord Financial News Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/Discord-Financial-News-Bot
+ExecStart=/home/botuser/Discord-Financial-News-Bot/.venv/bin/python bot.py
+
+# Restart automatically if the bot ever crashes.
+Restart=always
+RestartSec=10
+
+# Light hardening (safe defaults; the bot only needs its own directory).
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
