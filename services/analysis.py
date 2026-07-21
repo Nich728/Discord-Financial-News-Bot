@@ -11,7 +11,9 @@ from anthropic import Anthropic
 
 import config
 
-_client = Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=60.0)
+# max_retries handles transient 429/5xx (incl. 529 "overloaded") automatically
+# with exponential backoff before an exception ever reaches us.
+_client = Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=60.0, max_retries=5)
 
 SYSTEM = (
     "You are a financial news analyst. Rate how much a news item is likely to "
@@ -69,8 +71,12 @@ def _parse(text: str) -> dict:
     return {**_DEFAULT, "summary": text[:400]}
 
 
-def analyze_article(article: dict) -> dict:
-    """Stage 2 / on-demand: full summary + impact for a single article."""
+def analyze_article(article: dict):
+    """Stage 2 / on-demand: full summary + impact for a single article.
+
+    Returns None if the API call failed, so callers can skip rather than post
+    a degraded embed.
+    """
     prompt = _PROMPT.format(
         title=article.get("title", ""),
         source=article.get("source", ""),
@@ -87,8 +93,8 @@ def analyze_article(article: dict) -> dict:
         text = "".join(b.text for b in resp.content if b.type == "text")
         return _parse(text)
     except Exception as e:  # noqa: BLE001
-        print(f"[analysis] error: {e}")
-        return {**_DEFAULT, "summary": article.get("title", "")}
+        print(f"[analysis] summarize failed: {e}")
+        return None
 
 
 # ---- Stage 1: cheap, batched impact classification ----
@@ -126,11 +132,12 @@ def _parse_impacts(text: str, n: int):
     return impacts
 
 
-def classify_batch(articles: list) -> list:
+def classify_batch(articles: list):
     """Rate many headlines in ONE cheap call (tiny output per item).
 
-    Returns a list of "high"/"medium"/"low" aligned with `articles`.
-    Fails open (returns "high") so a glitch never silently drops real news.
+    Returns a list of "high"/"medium"/"low" aligned with `articles`, or None if
+    the API call failed — the caller should then retry the batch next poll
+    rather than guessing (guessing "high" would post unanalyzed articles).
     """
     if not articles:
         return []
@@ -155,5 +162,5 @@ def classify_batch(articles: list) -> list:
         text = "".join(b.text for b in resp.content if b.type == "text")
         return _parse_impacts(text, len(articles))
     except Exception as e:  # noqa: BLE001
-        print(f"[analysis] classify_batch error: {e}")
-        return ["high"] * len(articles)
+        print(f"[analysis] classify failed: {e}")
+        return None
