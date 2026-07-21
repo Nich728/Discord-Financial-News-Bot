@@ -46,12 +46,20 @@ async def poll_market(bot, market: str):
     posted = 0
     summarized = 0
     if candidates:
-        # These are being handled this cycle — don't reconsider them next poll.
-        for article in candidates:
-            db.mark_seen(article["url"])
-
         # Stage 1: ONE cheap batched call rates all candidates.
         impacts = await asyncio.to_thread(analysis.classify_batch, candidates)
+        if impacts is None:
+            # API failed (e.g. 529 overloaded). Leave these unseen so the whole
+            # batch is retried next poll rather than silently lost.
+            print(
+                f"[scheduler] {market}: classify failed — retrying "
+                f"{len(candidates)} article(s) next poll"
+            )
+            return
+
+        # Classified successfully — don't reconsider these next poll.
+        for article in candidates:
+            db.mark_seen(article["url"])
 
         # Stage 2: full summary only for the ones that clear the impact bar.
         for article, impact in zip(candidates, impacts):
@@ -61,6 +69,8 @@ async def poll_market(bot, market: str):
                 continue
             summarized += 1
             result = await asyncio.to_thread(analysis.analyze_article, article)
+            if result is None:
+                continue  # summary failed — skip rather than post a stub
             result["impact"] = impact  # keep the strict stage-1 verdict
             try:
                 await channel.send(embed=publisher.build_news_embed(article, result))
@@ -91,6 +101,8 @@ async def _audit_dropped(market: str, dropped: list, min_rank: int):
         else random.sample(dropped, config.AUDIT_MAX)
     )
     impacts = await asyncio.to_thread(analysis.classify_batch, sample)
+    if impacts is None:
+        return  # audit is best-effort; skip quietly if the API is unavailable
     for article, impact in zip(sample, impacts):
         if IMPACT_RANK.get(impact, 1) >= min_rank:
             line = f"[audit] {market}: gate DROPPED a '{impact}' article -> {article['title']}"

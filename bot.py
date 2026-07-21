@@ -81,9 +81,18 @@ async def news_cmd(interaction: discord.Interaction, market: app_commands.Choice
     if not articles:
         await interaction.followup.send("No news found right now — try again shortly.")
         return
+    sent = 0
     for article in articles[:3]:
         result = await asyncio.to_thread(analysis.analyze_article, article)
+        if result is None:
+            continue  # analysis unavailable (e.g. API overloaded) — skip it
         await interaction.followup.send(embed=publisher.build_news_embed(article, result))
+        sent += 1
+    if sent == 0:
+        await interaction.followup.send(
+            "Couldn't analyze the latest headlines right now (the API may be "
+            "temporarily overloaded). Try again in a minute."
+        )
 
 
 @bot.tree.command(name="ta", description="TradingView technical rating for a symbol")
