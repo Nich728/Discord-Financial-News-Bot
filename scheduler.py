@@ -71,7 +71,18 @@ async def poll_market(bot, market: str):
             result = await asyncio.to_thread(analysis.analyze_article, article)
             if result is None:
                 continue  # summary failed — skip rather than post a stub
-            result["impact"] = impact  # keep the strict stage-1 verdict
+
+            # Stage 2 gets the full article context, so treat it as the
+            # authoritative verdict. If it disagrees with stage 1, don't post —
+            # this catches stage-1 false positives and keeps the displayed
+            # impact consistent with the rationale shown next to it.
+            final_impact = (result.get("impact") or "low").lower()
+            if IMPACT_RANK.get(final_impact, 1) < min_rank:
+                print(
+                    f"[scheduler] {market}: stage-2 downgraded "
+                    f"'{article['title'][:60]}' to {final_impact} — not posting"
+                )
+                continue
             try:
                 await channel.send(embed=publisher.build_news_embed(article, result))
                 posted += 1
