@@ -34,6 +34,14 @@ MIN_IMPACT = os.getenv("MIN_IMPACT", "high").lower()
 ANALYSIS_MODEL = os.getenv("ANALYSIS_MODEL", "claude-haiku-4-5")
 DB_PATH = os.getenv("DB_PATH", "bot.db")
 
+# ---- Gate audit (QA: catch important articles the keyword gate dropped) ----
+# When true, gate-dropped articles ALSO get classified so the bot warns you if
+# any were actually high-impact (i.e. a keyword is missing). Costs extra LLM
+# calls, so enable it temporarily to tune PREFILTER_KEYWORDS, then turn it off.
+AUDIT_GATE = os.getenv("AUDIT_GATE", "false").lower() in ("1", "true", "yes")
+# Max gate-dropped articles to audit per market per poll (bounds the extra cost).
+AUDIT_MAX = int(os.getenv("AUDIT_MAX", "10"))
+
 # ---- Keyword pre-filter (free gate before the LLM) ----
 # When enabled, only articles whose title/snippet mention a market-moving
 # keyword get an LLM call. Set PREFILTER_ENABLED=false to analyze everything.
@@ -49,7 +57,7 @@ _DEFAULT_KEYWORDS = [
     # Geopolitics
     "tariff", "sanction", "war", "invasion", "airstrike", "missile",
     "military strike", "ceasefire", "conflict", "opec", "oil price",
-    "energy crisis", "supply shock",
+    "energy crisis", "supply shock", "trump",
     # Markets / corporate
     "earnings", "guidance", "merger", "acquisition", "buyout", "ipo",
     "bankruptcy", "bailout", "lawsuit", "regulation", "antitrust",
@@ -57,7 +65,7 @@ _DEFAULT_KEYWORDS = [
     "record high", "record low",
     # Crypto
     "bitcoin", "ethereum", "etf approval", "spot etf", "hack", "exploit",
-    "stablecoin", "halving",
+    "stablecoin", "halving", "crypto", "whale",
     # Indonesia
     "ihsg", "rupiah", "prabowo",
 ]
