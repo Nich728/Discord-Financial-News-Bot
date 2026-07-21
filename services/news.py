@@ -1,16 +1,36 @@
-"""News aggregation: RSS (no key) + GNews + NewsAPI, de-duplicated by URL.
+"""News aggregation — RSS only, de-duplicated by URL. No API keys, no rate limits.
 
-Each source is wrapped in try/except so one failing feed never kills a poll.
+Two RSS sources per market:
+  1. Curated outlet feeds (CNBC, Yahoo Finance, CoinDesk, ...).
+  2. Google News RSS *search* — keyword-scoped, aggregates many outlets
+     (Bloomberg, Reuters, CNBC, etc.) in real time, for free.
+
+Each feed is wrapped in try/except so one failing feed never kills a poll.
 Returns a list of article dicts:
     {title, url, source, description, published, market}
 Synchronous — call via asyncio.to_thread from the async bot.
 """
+from urllib.parse import urlencode
+
 import feedparser
 import httpx
 
-import config
+# Bound every feed request so one unresponsive server can't stall a whole poll.
+_HTTP_TIMEOUT = 15  # seconds
+_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DiscordFinanceBot/1.0)"}
 
-# Curated RSS feeds per market. Adjust freely — these need no API key.
+
+def _parse_feed(url: str):
+    """Download a feed with a hard timeout, then parse the bytes.
+
+    feedparser.parse(url) has NO timeout and can hang forever on a dead server,
+    which would freeze the scheduler. Fetching via httpx bounds each request.
+    """
+    resp = httpx.get(url, timeout=_HTTP_TIMEOUT, follow_redirects=True, headers=_HEADERS)
+    resp.raise_for_status()
+    return feedparser.parse(resp.content)
+
+# Curated outlet RSS feeds per market. Adjust freely — these need no API key.
 RSS_FEEDS = {
     "us": [
         "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
@@ -27,16 +47,31 @@ RSS_FEEDS = {
     ],
 }
 
-# Query terms per market for the keyword-based APIs.
-GNEWS_QUERY = {
-    "us": ("stock market", "en", "us"),
-    "id": ("saham IHSG", "id", "id"),
-    "crypto": ("cryptocurrency", "en", None),
-}
-NEWSAPI_QUERY = {
-    "us": {"category": "business", "country": "us", "_endpoint": "top-headlines"},
-    "id": {"q": "saham OR IHSG OR ekonomi", "language": "id", "_endpoint": "everything"},
-    "crypto": {"q": "cryptocurrency OR bitcoin", "language": "en", "_endpoint": "everything"},
+# Google News RSS search — free, no key, keyword-scoped, real-time.
+# Each market has a LIST of queries; add more outlets with a site: filter.
+# hl/gl/ceid localize the results (language / country / edition).
+# Bloomberg's own RSS is discontinued, but a `site:bloomberg.com` Google News
+# query surfaces its headlines (analysis uses the headline + snippet, which are
+# available even though the full article is paywalled).
+GOOGLE_NEWS = {
+    "us": [
+        {"q": "stock market OR S&P 500 OR Nasdaq OR Federal Reserve OR earnings",
+         "hl": "en-US", "gl": "US", "ceid": "US:en"},
+        {"q": "site:bloomberg.com (markets OR stocks OR economy OR Fed OR earnings)",
+         "hl": "en-US", "gl": "US", "ceid": "US:en"},
+    ],
+    "id": [
+        {"q": "IHSG OR saham OR ekonomi Indonesia OR Bank Indonesia OR rupiah",
+         "hl": "id", "gl": "ID", "ceid": "ID:id"},
+        {"q": "site:bloomberg.com Indonesia (markets OR economy OR rupiah)",
+         "hl": "en-US", "gl": "US", "ceid": "US:en"},
+    ],
+    "crypto": [
+        {"q": "cryptocurrency OR bitcoin OR ethereum OR crypto market",
+         "hl": "en-US", "gl": "US", "ceid": "US:en"},
+        {"q": "site:bloomberg.com (crypto OR bitcoin OR ethereum)",
+         "hl": "en-US", "gl": "US", "ceid": "US:en"},
+    ],
 }
 
 
@@ -44,7 +79,7 @@ def _fetch_rss(market: str):
     out = []
     for url in RSS_FEEDS.get(market, []):
         try:
-            feed = feedparser.parse(url)
+            feed = _parse_feed(url)
             source = feed.feed.get("title", url)
             for entry in feed.entries[:15]:
                 link = entry.get("link")
@@ -63,57 +98,40 @@ def _fetch_rss(market: str):
     return out
 
 
-def _fetch_gnews(market: str):
-    if not config.GNEWS_KEY:
-        return []
-    query, lang, country = GNEWS_QUERY[market]
-    params = {"q": query, "lang": lang, "max": 10, "apikey": config.GNEWS_KEY}
-    if country:
-        params["country"] = country
-    try:
-        r = httpx.get("https://gnews.io/api/v4/search", params=params, timeout=15)
-        r.raise_for_status()
-        return [{
-            "title": a.get("title", "(untitled)"),
-            "url": a.get("url"),
-            "source": (a.get("source") or {}).get("name", "GNews"),
-            "description": (a.get("description", "") or "")[:600],
-            "published": a.get("publishedAt", ""),
-            "market": market,
-        } for a in r.json().get("articles", []) if a.get("url")]
-    except Exception as e:  # noqa: BLE001
-        print(f"[news] GNews error ({market}): {e}")
-        return []
-
-
-def _fetch_newsapi(market: str):
-    if not config.NEWSAPI_KEY:
-        return []
-    cfg = dict(NEWSAPI_QUERY[market])
-    endpoint = cfg.pop("_endpoint")
-    cfg["apiKey"] = config.NEWSAPI_KEY
-    cfg["pageSize"] = 10
-    if endpoint == "everything":
-        cfg["sortBy"] = "publishedAt"
-    try:
-        r = httpx.get(f"https://newsapi.org/v2/{endpoint}", params=cfg, timeout=15)
-        r.raise_for_status()
-        return [{
-            "title": a.get("title", "(untitled)"),
-            "url": a.get("url"),
-            "source": (a.get("source") or {}).get("name", "NewsAPI"),
-            "description": (a.get("description", "") or "")[:600],
-            "published": a.get("publishedAt", ""),
-            "market": market,
-        } for a in r.json().get("articles", []) if a.get("url")]
-    except Exception as e:  # noqa: BLE001
-        print(f"[news] NewsAPI error ({market}): {e}")
-        return []
+def _fetch_google_news(market: str):
+    out = []
+    for cfg in GOOGLE_NEWS.get(market, []):
+        url = "https://news.google.com/rss/search?" + urlencode({
+            "q": cfg["q"], "hl": cfg["hl"], "gl": cfg["gl"], "ceid": cfg["ceid"],
+        })
+        try:
+            feed = _parse_feed(url)
+            for entry in feed.entries[:15]:
+                link = entry.get("link")
+                if not link:
+                    continue
+                # Google News puts the outlet name in <source> and appends
+                # " - Source" to the title; pull it out and clean the title.
+                source = (entry.get("source") or {}).get("title", "") or "Google News"
+                title = entry.get("title", "(untitled)")
+                if source and title.endswith(f" - {source}"):
+                    title = title[: -len(f" - {source}")]
+                out.append({
+                    "title": title,
+                    "url": link,
+                    "source": source,
+                    "description": (entry.get("summary", "") or "")[:600],
+                    "published": entry.get("published", ""),
+                    "market": market,
+                })
+        except Exception as e:  # noqa: BLE001
+            print(f"[news] Google News error ({market}, {cfg['q'][:30]}...): {e}")
+    return out
 
 
 def fetch_all(market: str):
-    """Aggregate all sources for a market and de-dupe by URL (order preserved)."""
-    articles = _fetch_rss(market) + _fetch_gnews(market) + _fetch_newsapi(market)
+    """Aggregate outlet RSS + Google News RSS; de-dupe by URL (order preserved)."""
+    articles = _fetch_rss(market) + _fetch_google_news(market)
     seen, unique = set(), []
     for a in articles:
         if a["url"] in seen:

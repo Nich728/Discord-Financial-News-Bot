@@ -10,6 +10,7 @@ Slash commands:
 Plus scheduled auto-push of analyzed news to per-market channels.
 """
 import asyncio
+from typing import Optional
 
 import discord
 from discord import app_commands
@@ -56,7 +57,7 @@ async def ping(interaction: discord.Interaction):
 async def price(
     interaction: discord.Interaction,
     symbol: str,
-    market: app_commands.Choice[str] | None = None,
+    market: Optional[app_commands.Choice[str]] = None,
 ):
     await interaction.response.defer()
     market_value = market.value if market else None

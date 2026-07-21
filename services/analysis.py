@@ -11,7 +11,7 @@ from anthropic import Anthropic
 
 import config
 
-_client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+_client = Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=60.0)
 
 SYSTEM = (
     "You are a financial news analyst. Rate how much a news item is likely to "
