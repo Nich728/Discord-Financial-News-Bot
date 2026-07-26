@@ -58,6 +58,9 @@ _DEFAULT_KEYWORDS = [
     "tariff", "sanction", "war", "invasion", "airstrike", "missile",
     "military strike", "ceasefire", "conflict", "opec", "oil price",
     "energy crisis", "supply shock", "trump",
+    # Geoeconomics / de-dollarization
+    "brics", "de-dollarization", "dedollarization", "reserve currency",
+    "trade deal", "trade agreement", "trade war", "export ban",
     # Markets / corporate
     "earnings", "guidance", "merger", "acquisition", "buyout", "ipo",
     "bankruptcy", "bailout", "lawsuit", "regulation", "antitrust",
@@ -88,6 +91,13 @@ _DEFAULT_BLOCK = [
     "stocks to watch", "stocks to buy", "best stocks", "top picks",
     "price prediction", "technical analysis", "what to watch",
     "things to know", "how to", "explainer",
+    # Analyst opinion / speculation (note: "credit rating" stays allowed —
+    # these are distinct phrases, matched whole)
+    "price target", "analyst rating", "hold rating", "buy rating",
+    "sell rating", "stock split", "will explode", "here's why",
+    "here's when", "here is why", "here is when",
+    # Crypto price-hype patterns
+    "prediction", "predicts", "should you buy", "buy the dip",
 ]
 
 _env_block = os.getenv("PREFILTER_BLOCK")

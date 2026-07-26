@@ -36,14 +36,22 @@ RSS_FEEDS = {
         "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
         "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         "https://finance.yahoo.com/news/rssindex",
+        # BRICS / de-dollarization — real geopolitical + currency events.
+        # (Watcher.guru's general feed is skipped: it's mostly price targets.)
+        "https://watcher.guru/news/category/brics/feed",
     ],
     "id": [
         "https://www.cnbcindonesia.com/market/rss",
         "https://www.kontan.co.id/rss",
+        "https://www.bloombergtechnoz.com/rss",
     ],
     "crypto": [
         "https://www.coindesk.com/arc/outboundfeeds/rss/",
         "https://cointelegraph.com/rss",
+        # Watcher.guru category feeds. Heavy on price commentary, so most items
+        # are dropped by the blocklist or rated "low" — kept for event coverage.
+        "https://watcher.guru/news/category/bitcoin/feed",
+        "https://watcher.guru/news/category/ethereum/feed",
     ],
 }
 
