@@ -11,6 +11,21 @@ from storage import db
 
 IMPACT_RANK = {"low": 1, "medium": 2, "high": 3}
 
+DUPLICATES_LOG = "duplicates.log"
+AUDIT_LOG = "gate_audit.log"
+
+
+def _log_to_file(filename: str, line: str, url: str = ""):
+    """Append a timestamped line to a local log file (best-effort)."""
+    try:
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(filename, "a", encoding="utf-8") as f:
+            f.write(f"{stamp} {line}\n")
+            if url:
+                f.write(f"    {url}\n")
+    except Exception as e:  # noqa: BLE001 - logging must never break a poll
+        print(f"[scheduler] could not write {filename}: {e}")
+
 
 async def poll_market(bot, market: str):
     channel_id = config.CHANNELS.get(market)
@@ -45,10 +60,15 @@ async def poll_market(bot, market: str):
 
     posted = 0
     summarized = 0
+    duplicates = 0
     if candidates:
-        # Stage 1: ONE cheap batched call rates all candidates.
-        impacts = await asyncio.to_thread(analysis.classify_batch, candidates)
-        if impacts is None:
+        # Stage 1: ONE cheap batched call rates all candidates and flags
+        # articles covering a story we already posted (or another candidate).
+        recent = await asyncio.to_thread(db.recent_posted_stories, market)
+        classifications = await asyncio.to_thread(
+            analysis.classify_batch, candidates, recent
+        )
+        if classifications is None:
             # API failed (e.g. 529 overloaded). Leave these unseen so the whole
             # batch is retried next poll rather than silently lost.
             print(
@@ -62,9 +82,19 @@ async def poll_market(bot, market: str):
             db.mark_seen(article["url"])
 
         # Stage 2: full summary only for the ones that clear the impact bar.
-        for article, impact in zip(candidates, impacts):
+        for article, cls in zip(candidates, classifications):
             if posted >= config.MAX_ARTICLES_PER_POLL:
                 break
+            if cls.get("duplicate"):
+                duplicates += 1
+                _log_to_file(
+                    DUPLICATES_LOG,
+                    f"[{market}] \"{article['title']}\" "
+                    f"({article.get('source', '?')})",
+                    article.get("url", ""),
+                )
+                continue
+            impact = cls.get("impact", "low")
             if IMPACT_RANK.get(impact, 1) < min_rank:
                 continue
             summarized += 1
@@ -86,6 +116,9 @@ async def poll_market(bot, market: str):
             try:
                 await channel.send(embed=publisher.build_news_embed(article, result))
                 posted += 1
+                # Remember what we posted so other outlets' copies of the same
+                # story get flagged as duplicates in future polls.
+                db.add_posted_story(article["title"], market)
             except Exception as e:  # noqa: BLE001
                 print(f"[scheduler] send failed for {market}: {e}")
 
@@ -96,7 +129,7 @@ async def poll_market(bot, market: str):
     print(
         f"[scheduler] {market}: fetched {len(articles)}, "
         f"gate-dropped {len(dropped)}, classified {len(candidates)}, "
-        f"summarized {summarized}, posted {posted}"
+        f"duplicates {duplicates}, summarized {summarized}, posted {posted}"
     )
 
 
@@ -111,22 +144,18 @@ async def _audit_dropped(market: str, dropped: list, min_rank: int):
         if len(dropped) <= config.AUDIT_MAX
         else random.sample(dropped, config.AUDIT_MAX)
     )
-    impacts = await asyncio.to_thread(analysis.classify_batch, sample)
-    if impacts is None:
+    classifications = await asyncio.to_thread(analysis.classify_batch, sample)
+    if classifications is None:
         return  # audit is best-effort; skip quietly if the API is unavailable
-    for article, impact in zip(sample, impacts):
+    for article, cls in zip(sample, classifications):
+        impact = cls.get("impact", "low")
         if IMPACT_RANK.get(impact, 1) >= min_rank:
-            line = f"[audit] {market}: gate DROPPED a '{impact}' article -> {article['title']}"
-            print(line)
-            _log_audit_miss(line, article)
-
-
-def _log_audit_miss(line: str, article: dict):
-    try:
-        with open("gate_audit.log", "a", encoding="utf-8") as f:
-            f.write(f"{line}\n    {article.get('url', '')}\n")
-    except Exception:  # noqa: BLE001
-        pass
+            line = (
+                f"[{market}] gate DROPPED a '{impact}' article -> "
+                f"{article['title']}"
+            )
+            print(f"[audit] {line}")
+            _log_to_file(AUDIT_LOG, line, article.get("url", ""))
 
 
 async def poll_all(bot):

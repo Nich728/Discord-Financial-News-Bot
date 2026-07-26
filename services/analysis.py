@@ -111,10 +111,15 @@ _CLASSIFY_SYSTEM = (
 )
 
 
-def _parse_impacts(text: str, n: int):
+def _parse_classifications(text: str, n: int):
+    """Parse the classify response into [{"impact": ..., "duplicate": bool}].
+
+    Fail-open on impact ("high" -> proceeds to stage 2, which re-judges) and
+    fail-closed on duplicate (False -> never wrongly suppress a story).
+    """
     text = text.strip()
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
-    impacts = ["high"] * n  # fail-open: if unsure, let it through to summary
+    results = [{"impact": "high", "duplicate": False} for _ in range(n)]
     raw = text
     if not raw.startswith("["):
         match = re.search(r"\[.*\]", text, re.DOTALL)
@@ -123,24 +128,29 @@ def _parse_impacts(text: str, n: int):
     try:
         data = json.loads(raw)
     except Exception:  # noqa: BLE001
-        return impacts
+        return results
     for obj in data if isinstance(data, list) else []:
         try:
             i = int(obj.get("index"))
             impact = (obj.get("impact") or "").lower()
         except Exception:  # noqa: BLE001
             continue
-        if 0 <= i < n and impact in ("high", "medium", "low"):
-            impacts[i] = impact
-    return impacts
+        if 0 <= i < n:
+            if impact in ("high", "medium", "low"):
+                results[i]["impact"] = impact
+            results[i]["duplicate"] = bool(obj.get("duplicate", False))
+    return results
 
 
-def classify_batch(articles: list):
+def classify_batch(articles: list, recent_titles: list = None):
     """Rate many headlines in ONE cheap call (tiny output per item).
 
-    Returns a list of "high"/"medium"/"low" aligned with `articles`, or None if
-    the API call failed — the caller should then retry the batch next poll
-    rather than guessing (guessing "high" would post unanalyzed articles).
+    Returns [{"impact": "high"/"medium"/"low", "duplicate": bool}, ...] aligned
+    with `articles`, or None if the API call failed — the caller should then
+    retry the batch next poll rather than guessing.
+
+    `recent_titles` (stories already posted) enables duplicate detection: the
+    same event covered by many outlets should only be posted once.
     """
     if not articles:
         return []
@@ -148,8 +158,19 @@ def classify_batch(articles: list):
     for i, a in enumerate(articles):
         desc = (a.get("description", "") or "")[:200]
         lines.append(f"{i}. [{a.get('market', '')}] {a.get('title', '')} — {desc}")
+
+    recent_section = ""
+    if recent_titles:
+        recent_section = (
+            "Stories we ALREADY POSTED recently (a headline about the same "
+            "underlying event as any of these is a duplicate):\n"
+            + "\n".join(f"- {t}" for t in recent_titles)
+            + "\n\n"
+        )
+
     prompt = (
-        "Rate the likely market impact of each numbered headline as "
+        recent_section
+        + "Rate the likely market impact of each numbered headline as "
         '"high", "medium", or "low", using this guide:\n'
         '- "high": ONLY events that have already happened and move markets — '
         "macroeconomic data releases (CPI, GDP, jobs), central-bank/Fed rate "
@@ -167,18 +188,22 @@ def classify_batch(articles: list):
         "Be strict: most headlines are 'low'. If a headline only predicts, "
         "recommends, or comments, it is 'low' no matter which assets it names.\n\n"
         + "\n".join(lines)
-        + "\n\nRespond with ONLY a JSON array, one object per headline, reusing "
-        'the same indices: [{"index": 0, "impact": "low"}, ...]'
+        + "\n\nAlso set \"duplicate\": true on any headline that covers the same "
+        "underlying event/story as (a) one of the already-posted stories above, "
+        "or (b) a LOWER-numbered headline in this batch. Different angles on "
+        "the same event still count as duplicates.\n\n"
+        "Respond with ONLY a JSON array, one object per headline, reusing "
+        'the same indices: [{"index": 0, "impact": "low", "duplicate": false}, ...]'
     )
     try:
         resp = _client.messages.create(
             model=config.ANALYSIS_MODEL,
-            max_tokens=20 + 15 * len(articles),
+            max_tokens=20 + 25 * len(articles),
             system=_CLASSIFY_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(b.text for b in resp.content if b.type == "text")
-        return _parse_impacts(text, len(articles))
+        return _parse_classifications(text, len(articles))
     except Exception as e:  # noqa: BLE001
         print(f"[analysis] classify failed: {e}")
         return None
