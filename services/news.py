@@ -10,6 +10,9 @@ Returns a list of article dicts:
     {title, url, source, description, published, market}
 Synchronous — call via asyncio.to_thread from the async bot.
 """
+import re
+import time
+from calendar import timegm
 from urllib.parse import urlencode
 
 import feedparser
@@ -147,3 +150,98 @@ def fetch_all(market: str):
         seen.add(a["url"])
         unique.append(a)
     return unique
+
+
+# --- Free near-duplicate detection by headline similarity (no LLM) ---
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _stem(tok: str) -> str:
+    # Crude plural normalization so loan/loans, rise/rises match.
+    if len(tok) > 4 and tok.endswith("s"):
+        return tok[:-1]
+    return tok
+
+
+def _title_tokens(title: str) -> set:
+    return {
+        _stem(t) for t in _WORD_RE.findall((title or "").lower()) if len(t) >= 3
+    }
+
+
+def _is_similar(a: set, b: set, threshold: float = 0.5) -> bool:
+    """True if two headline token-sets likely describe the same story."""
+    if not a or not b:
+        return False
+    inter = len(a & b)
+    if inter == 0:
+        return False
+    jaccard = inter / len(a | b)
+    containment = inter / min(len(a), len(b))
+    # High overlap OR the shorter title is mostly contained in the longer.
+    return jaccard >= threshold or containment >= 0.7
+
+
+def _dedupe_similar(articles: list, threshold: float = 0.5) -> list:
+    """Drop near-duplicate headlines, keeping the first (newest) of each cluster."""
+    kept, kept_tokens = [], []
+    for art in articles:
+        tokens = _title_tokens(art.get("title", ""))
+        if any(_is_similar(tokens, kt, threshold) for kt in kept_tokens):
+            continue
+        kept.append(art)
+        kept_tokens.append(tokens)
+    return kept
+
+
+def fetch_ticker_news(symbol: str, name: str = None, market: str = None,
+                      hours: int = 48, limit: int = 8):
+    """Recent news about ONE ticker via Google News search, newest first.
+
+    `name` (the resolved company/asset name) sharpens the query when available.
+    Returns dicts with an extra `ts` (epoch seconds) for sorting/relative time.
+    """
+    base = symbol.strip().lstrip("$")
+    term = base.upper().replace(".JK", "").replace("-USD", "")
+    if name and name.strip().lower() not in ("", term.lower(), base.lower()):
+        query = f'"{name}" OR {term}'
+    else:
+        query = term
+
+    if market == "id" or base.upper().endswith(".JK"):
+        hl, gl, ceid = "id", "ID", "ID:id"
+    else:
+        hl, gl, ceid = "en-US", "US", "US:en"
+
+    url = "https://news.google.com/rss/search?" + urlencode(
+        {"q": query, "hl": hl, "gl": gl, "ceid": ceid}
+    )
+
+    cutoff = time.time() - hours * 3600
+    collected = []
+    try:
+        feed = _parse_feed(url)
+    except Exception as e:  # noqa: BLE001
+        print(f"[news] ticker news error ({term}): {e}")
+        return []
+
+    for entry in feed.entries:
+        link = entry.get("link")
+        if not link:
+            continue
+        parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+        ts = timegm(parsed) if parsed else 0  # feedparser times are UTC
+        if ts and ts < cutoff:
+            continue
+        source = (entry.get("source") or {}).get("title", "") or "Google News"
+        title = entry.get("title", "(untitled)")
+        if source and title.endswith(f" - {source}"):
+            title = title[: -len(f" - {source}")]
+        collected.append({
+            "title": title, "url": link, "source": source, "ts": ts,
+            "published": entry.get("published", ""),
+        })
+
+    collected.sort(key=lambda a: a["ts"], reverse=True)
+    collected = _dedupe_similar(collected)  # keep the newest of each story
+    return collected[:limit]

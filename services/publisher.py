@@ -59,6 +59,41 @@ def build_news_embed(article: dict, analysis: dict) -> discord.Embed:
     return embed
 
 
+def _relative_time(ts) -> str:
+    if not ts:
+        return ""
+    import time
+    diff = time.time() - ts
+    if diff < 3600:
+        return f"{int(diff // 60)}m ago"
+    if diff < 86400:
+        return f"{int(diff // 3600)}h ago"
+    return f"{int(diff // 86400)}d ago"
+
+
+def build_ticker_news_embed(title: str, articles: list, hours: int = 48) -> discord.Embed:
+    if not articles:
+        embed = discord.Embed(
+            title=title,
+            description=f"No news found in the last {hours} hours.",
+            color=0x95A5A6,
+        )
+        embed.set_footer(text="Not financial advice")
+        return embed
+
+    lines = []
+    for a in articles:
+        meta = " · ".join(x for x in [a.get("source", ""), _relative_time(a.get("ts"))] if x)
+        lines.append(f"• [{a['title'][:180]}]({a['url']}) — {meta}")
+    embed = discord.Embed(
+        title=title,
+        description="\n".join(lines)[:4096],
+        color=0x3498DB,
+    )
+    embed.set_footer(text=f"Last {hours}h • Not financial advice")
+    return embed
+
+
 def build_ta_embed(ta: dict) -> discord.Embed:
     rec = (ta.get("recommendation") or "NEUTRAL").upper()
     embed = discord.Embed(
