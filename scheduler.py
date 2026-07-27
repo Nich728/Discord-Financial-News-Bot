@@ -43,8 +43,10 @@ async def poll_market(bot, market: str):
         return
 
     min_rank = IMPACT_RANK.get(config.MIN_IMPACT, 3)
+    trusted_rank = IMPACT_RANK.get(config.TRUSTED_MIN_IMPACT, 2)
 
     # Free keyword gate -> collect unseen candidates + track what got dropped.
+    # Trusted sources bypass the gate entirely (the LLM still judges impact).
     dropped = []
     candidates = []
     for article in articles:
@@ -52,7 +54,7 @@ async def poll_market(bot, market: str):
             break
         if db.is_seen(article["url"]):
             continue
-        if not prefilter.is_relevant(article):
+        if not article.get("trusted") and not prefilter.is_relevant(article):
             db.mark_seen(article["url"])
             dropped.append(article)
             continue
@@ -94,8 +96,10 @@ async def poll_market(bot, market: str):
                     article.get("url", ""),
                 )
                 continue
+            # Trusted sources post at a lower impact bar than everyone else.
+            bar = trusted_rank if article.get("trusted") else min_rank
             impact = cls.get("impact", "low")
-            if IMPACT_RANK.get(impact, 1) < min_rank:
+            if IMPACT_RANK.get(impact, 1) < bar:
                 continue
             summarized += 1
             result = await asyncio.to_thread(analysis.analyze_article, article)
@@ -107,7 +111,7 @@ async def poll_market(bot, market: str):
             # this catches stage-1 false positives and keeps the displayed
             # impact consistent with the rationale shown next to it.
             final_impact = (result.get("impact") or "low").lower()
-            if IMPACT_RANK.get(final_impact, 1) < min_rank:
+            if IMPACT_RANK.get(final_impact, 1) < bar:
                 print(
                     f"[scheduler] {market}: stage-2 downgraded "
                     f"'{article['title'][:60]}' to {final_impact} — not posting"

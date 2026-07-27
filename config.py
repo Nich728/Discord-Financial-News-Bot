@@ -107,6 +107,19 @@ PREFILTER_BLOCK = (
     else _DEFAULT_BLOCK
 )
 
+# ---- Trusted sources ----
+# Curated outlets whose articles bypass the keyword gate (so good stories with
+# no keyword aren't pre-dropped) AND post at a lower impact bar. Matched as a
+# substring against each article's source name and URL.
+_env_trusted = os.getenv("TRUSTED_SOURCES")
+TRUSTED_SOURCES = (
+    [s.strip().lower() for s in _env_trusted.split(",") if s.strip()]
+    if _env_trusted
+    else ["bloomberg technoz", "bloombergtechnoz"]
+)
+# Impact bar for trusted sources (vs MIN_IMPACT for everything else).
+TRUSTED_MIN_IMPACT = os.getenv("TRUSTED_MIN_IMPACT", "medium").lower()
+
 MARKETS = ("us", "id", "crypto")
 
 
