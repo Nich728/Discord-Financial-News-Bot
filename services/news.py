@@ -18,6 +18,8 @@ from urllib.parse import urlencode
 import feedparser
 import httpx
 
+import config
+
 # Bound every feed request so one unresponsive server can't stall a whole poll.
 _HTTP_TIMEOUT = 15  # seconds
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DiscordFinanceBot/1.0)"}
@@ -33,6 +35,12 @@ def _parse_feed(url: str):
     resp.raise_for_status()
     return feedparser.parse(resp.content)
 
+
+def _is_trusted(source: str, url: str) -> bool:
+    """True for curated sources that bypass the keyword gate (config.TRUSTED_SOURCES)."""
+    hay = f"{source} {url}".lower()
+    return any(t in hay for t in config.TRUSTED_SOURCES)
+
 # Curated outlet RSS feeds per market. Adjust freely — these need no API key.
 RSS_FEEDS = {
     "us": [
@@ -44,9 +52,11 @@ RSS_FEEDS = {
         "https://watcher.guru/news/category/brics/feed",
     ],
     "id": [
-        "https://www.cnbcindonesia.com/market/rss",
-        "https://www.kontan.co.id/rss",
+        # CNBC Indonesia 403s from datacenter IPs and Kontan's feed went empty,
+        # so both were replaced with these.
         "https://www.bloombergtechnoz.com/rss",
+        "https://finance.detik.com/rss",
+        "https://id.investing.com/rss/news.rss",
     ],
     "crypto": [
         "https://www.coindesk.com/arc/outboundfeeds/rss/",
@@ -103,6 +113,7 @@ def _fetch_rss(market: str):
                     "description": (entry.get("summary", "") or "")[:600],
                     "published": entry.get("published", ""),
                     "market": market,
+                    "trusted": _is_trusted(source, link),
                 })
         except Exception as e:  # noqa: BLE001 - one bad feed shouldn't stop the rest
             print(f"[news] RSS error ({url}): {e}")
@@ -134,6 +145,7 @@ def _fetch_google_news(market: str):
                     "description": (entry.get("summary", "") or "")[:600],
                     "published": entry.get("published", ""),
                     "market": market,
+                    "trusted": _is_trusted(source, link),
                 })
         except Exception as e:  # noqa: BLE001
             print(f"[news] Google News error ({market}, {cfg['q'][:30]}...): {e}")
