@@ -26,14 +26,25 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DiscordFinanceBot/1.0)"}
 
 
 def _parse_feed(url: str):
-    """Download a feed with a hard timeout, then parse the bytes.
+    """Download a feed with a hard timeout (IPv4 only), then parse the bytes.
 
     feedparser.parse(url) has NO timeout and can hang forever on a dead server,
     which would freeze the scheduler. Fetching via httpx bounds each request.
+
+    IPv4 is forced (local_address="0.0.0.0"): the droplet has no IPv6 route, but
+    some hosts (e.g. detik.com) resolve to an IPv6 (AAAA) address first, which
+    would otherwise fail with "Network is unreachable".
     """
-    resp = httpx.get(url, timeout=_HTTP_TIMEOUT, follow_redirects=True, headers=_HEADERS)
-    resp.raise_for_status()
-    return feedparser.parse(resp.content)
+    transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=1)
+    with httpx.Client(
+        timeout=_HTTP_TIMEOUT,
+        follow_redirects=True,
+        headers=_HEADERS,
+        transport=transport,
+    ) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        return feedparser.parse(resp.content)
 
 
 def _is_trusted(source: str, url: str) -> bool:

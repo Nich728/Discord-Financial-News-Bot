@@ -20,6 +20,9 @@ Wants=network-online.target
 Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/Discord-Financial-News-Bot
+# Unbuffered stdout so print() output reaches journalctl immediately
+# (without this, systemd block-buffers it and the [scheduler] lines never show).
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/botuser/Discord-Financial-News-Bot/.venv/bin/python bot.py
 
 # Restart automatically if the bot ever crashes.
