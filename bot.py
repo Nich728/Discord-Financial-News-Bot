@@ -122,6 +122,47 @@ async def ta(
     await interaction.followup.send(embed=publisher.build_ta_embed(result))
 
 
+@bot.tree.command(name="tickernews", description="Latest news about a specific ticker (last 48h)")
+@app_commands.describe(
+    symbol="e.g. BMRI, AAPL, BTC (no need for the .JK suffix)",
+    market="Pick Indonesia (IDX) for local tickers like BMRI",
+)
+@app_commands.choices(market=MARKET_CHOICES)
+async def tickernews(
+    interaction: discord.Interaction,
+    symbol: str,
+    market: Optional[app_commands.Choice[str]] = None,
+):
+    await interaction.response.defer()
+    market_value = market.value if market else None
+    base = symbol.strip().lstrip("$")
+
+    # Resolve the company/asset name for a sharper search (best-effort).
+    name = None
+    try:
+        price = await asyncio.to_thread(prices.get_price, base, market_value)
+        if price:
+            name = price.get("name")
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Fetch a few extra (free lexical dedup already applied), then run the
+    # cheap LLM semantic dedup, then trim to the display count.
+    articles = await asyncio.to_thread(
+        news.fetch_ticker_news, base, name, market_value, 48, 15
+    )
+    articles = await asyncio.to_thread(analysis.dedupe_headlines, articles)
+    articles = articles[:8]
+    display = (
+        f"{name} ({base.upper()})"
+        if name and name.upper() != base.upper()
+        else base.upper()
+    )
+    await interaction.followup.send(
+        embed=publisher.build_ticker_news_embed(f"📰 News — {display}", articles)
+    )
+
+
 # ---- /watch group ----
 watch_group = app_commands.Group(name="watch", description="Manage your watchlist")
 

@@ -207,3 +207,67 @@ def classify_batch(articles: list, recent_titles: list = None):
     except Exception as e:  # noqa: BLE001
         print(f"[analysis] classify failed: {e}")
         return None
+
+
+# ---- Semantic de-duplication (for on-demand ticker news) ----
+
+_DEDUPE_SYSTEM = (
+    "You identify duplicate news headlines — different articles covering the "
+    "same underlying event or story. Different outlets, wording, or angles on "
+    "the same event all count as duplicates."
+)
+
+
+def _parse_dupe_flags(text: str, n: int):
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+    flags = [False] * n  # fail-closed: default keep (never wrongly drop)
+    raw = text
+    if not raw.startswith("["):
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if match:
+            raw = match.group(0)
+    try:
+        data = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return flags
+    for obj in data if isinstance(data, list) else []:
+        try:
+            i = int(obj.get("index"))
+        except Exception:  # noqa: BLE001
+            continue
+        if 0 <= i < n:
+            flags[i] = bool(obj.get("duplicate", False))
+    return flags
+
+
+def dedupe_headlines(articles: list) -> list:
+    """Remove semantic duplicates from a headline list, keeping the first
+    (newest) of each cluster. On API failure, returns the input unchanged.
+    """
+    if len(articles) < 2:
+        return articles
+    lines = [f"{i}. {a.get('title', '')}" for i, a in enumerate(articles)]
+    prompt = (
+        "Here are news headlines, newest first:\n\n"
+        + "\n".join(lines)
+        + '\n\nFor each headline set "duplicate": true if it covers the SAME '
+        "underlying story/event as any LOWER-numbered headline above it "
+        "(different wording or angle still counts as the same story). "
+        "Otherwise false.\n\n"
+        "Respond with ONLY a JSON array: "
+        '[{"index": 0, "duplicate": false}, ...]'
+    )
+    try:
+        resp = _client.messages.create(
+            model=config.ANALYSIS_MODEL,
+            max_tokens=20 + 15 * len(articles),
+            system=_DEDUPE_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        flags = _parse_dupe_flags(text, len(articles))
+    except Exception as e:  # noqa: BLE001
+        print(f"[analysis] dedupe failed: {e}")
+        return articles  # fail-open: keep everything rather than lose stories
+    return [a for a, is_dup in zip(articles, flags) if not is_dup]
