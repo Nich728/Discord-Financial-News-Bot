@@ -17,11 +17,15 @@ COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY") or None
 CHANNEL_ID_US = int(os.getenv("CHANNEL_ID_US", "0"))
 CHANNEL_ID_ID = int(os.getenv("CHANNEL_ID_ID", "0"))
 CHANNEL_ID_CRYPTO = int(os.getenv("CHANNEL_ID_CRYPTO", "0"))
+CHANNEL_ID_GLOBAL = int(os.getenv("CHANNEL_ID_GLOBAL", "0"))
 
+# Routing targets. "global" is a destination only — it has no feeds and is
+# never polled (see MARKETS); the classifier routes world/international news here.
 CHANNELS = {
     "us": CHANNEL_ID_US,
     "id": CHANNEL_ID_ID,
     "crypto": CHANNEL_ID_CRYPTO,
+    "global": CHANNEL_ID_GLOBAL,
 }
 
 # ---- Behaviour ----
@@ -33,6 +37,10 @@ MAX_SCAN_PER_POLL = int(os.getenv("MAX_SCAN_PER_POLL", "15"))
 MIN_IMPACT = os.getenv("MIN_IMPACT", "high").lower()
 ANALYSIS_MODEL = os.getenv("ANALYSIS_MODEL", "claude-haiku-4-5")
 DB_PATH = os.getenv("DB_PATH", "bot.db")
+
+# Force all DNS resolution to IPv4. Set true on IPv4-only hosts (e.g. a droplet
+# without IPv6) where some feeds resolve to IPv6 first and fail to connect.
+FORCE_IPV4 = os.getenv("FORCE_IPV4", "false").lower() in ("1", "true", "yes")
 
 # ---- Gate audit (QA: catch important articles the keyword gate dropped) ----
 # When true, gate-dropped articles ALSO get classified so the bot warns you if

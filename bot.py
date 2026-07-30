@@ -10,6 +10,7 @@ Slash commands:
 Plus scheduled auto-push of analyzed news to per-market channels.
 """
 import asyncio
+import socket
 from typing import Optional
 
 import discord
@@ -20,6 +21,27 @@ import config
 from scheduler import setup_scheduler
 from services import analysis, news, prices, publisher, technical
 from storage import db
+
+
+def force_ipv4():
+    """Make every DNS lookup return IPv4 addresses only.
+
+    On IPv4-only hosts (a droplet without IPv6), some feeds resolve to an IPv6
+    address first and fail to connect ("Network is unreachable"). Constraining
+    getaddrinfo to AF_INET makes all connections — feeds, Discord, Anthropic,
+    yfinance, CoinGecko — use IPv4. Applied before any network call.
+    """
+    _orig = socket.getaddrinfo
+
+    def _ipv4_only(host, port, family=0, *args, **kwargs):
+        return _orig(host, port, socket.AF_INET, *args, **kwargs)
+
+    socket.getaddrinfo = _ipv4_only
+    print("[net] FORCE_IPV4 enabled — resolving IPv4 only")
+
+
+if config.FORCE_IPV4:
+    force_ipv4()
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)

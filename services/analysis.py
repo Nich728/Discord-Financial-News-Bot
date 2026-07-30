@@ -119,7 +119,8 @@ def _parse_classifications(text: str, n: int):
     """
     text = text.strip()
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
-    results = [{"impact": "high", "duplicate": False} for _ in range(n)]
+    # market defaults to None -> caller keeps the fetch market.
+    results = [{"impact": "high", "duplicate": False, "market": None} for _ in range(n)]
     raw = text
     if not raw.startswith("["):
         match = re.search(r"\[.*\]", text, re.DOTALL)
@@ -139,6 +140,9 @@ def _parse_classifications(text: str, n: int):
             if impact in ("high", "medium", "low"):
                 results[i]["impact"] = impact
             results[i]["duplicate"] = bool(obj.get("duplicate", False))
+            mkt = (obj.get("market") or "").lower()
+            if mkt in ("us", "id", "crypto", "global"):
+                results[i]["market"] = mkt
     return results
 
 
@@ -192,13 +196,21 @@ def classify_batch(articles: list, recent_titles: list = None):
         "underlying event/story as (a) one of the already-posted stories above, "
         "or (b) a LOWER-numbered headline in this batch. Different angles on "
         "the same event still count as duplicates.\n\n"
-        "Respond with ONLY a JSON array, one object per headline, reusing "
-        'the same indices: [{"index": 0, "impact": "low", "duplicate": false}, ...]'
+        'Also set "market" to the topic each headline belongs to:\n'
+        '- "us": US stocks/markets, the Fed, US economic data, or US companies.\n'
+        '- "id": Indonesian stocks/economy — IHSG, rupiah, Bank Indonesia, or '
+        "Indonesian companies.\n"
+        '- "crypto": cryptocurrency, bitcoin, ethereum, or crypto markets.\n'
+        '- "global": international/world news that moves markets but does not '
+        "belong to the above — geopolitics (war, sanctions), oil/OPEC/commodities, "
+        "other economies (China, Europe, Japan), global trade/tariffs, or BRICS.\n\n"
+        "Respond with ONLY a JSON array, one object per headline, reusing the "
+        'same indices: [{"index": 0, "impact": "low", "duplicate": false, "market": "id"}, ...]'
     )
     try:
         resp = _client.messages.create(
             model=config.ANALYSIS_MODEL,
-            max_tokens=20 + 25 * len(articles),
+            max_tokens=20 + 30 * len(articles),
             system=_CLASSIFY_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
