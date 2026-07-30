@@ -44,15 +44,27 @@ def add_posted_story(title: str, market: str):
         )
 
 
-def recent_posted_stories(market: str, hours: int = 48, limit: int = 15):
-    """Titles posted for this market in the last `hours`, newest first."""
+def recent_posted_stories(market: str = None, hours: int = 48, limit: int = 25):
+    """Titles posted in the last `hours`, newest first.
+
+    Pass market=None to get titles across ALL channels (used for dedup, since
+    articles are routed to a channel by topic, not by the feed they came from).
+    """
+    cutoff = time.time() - hours * 3600
     with _lock, _conn() as c:
-        rows = c.execute(
-            "SELECT title FROM posted_stories"
-            " WHERE market = ? AND posted_at > ?"
-            " ORDER BY posted_at DESC LIMIT ?",
-            (market, time.time() - hours * 3600, limit),
-        ).fetchall()
+        if market is None:
+            rows = c.execute(
+                "SELECT title FROM posted_stories WHERE posted_at > ?"
+                " ORDER BY posted_at DESC LIMIT ?",
+                (cutoff, limit),
+            ).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT title FROM posted_stories"
+                " WHERE market = ? AND posted_at > ?"
+                " ORDER BY posted_at DESC LIMIT ?",
+                (market, cutoff, limit),
+            ).fetchall()
         return [r["title"] for r in rows]
 
 

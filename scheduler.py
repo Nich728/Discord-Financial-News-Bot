@@ -66,7 +66,8 @@ async def poll_market(bot, market: str):
     if candidates:
         # Stage 1: ONE cheap batched call rates all candidates and flags
         # articles covering a story we already posted (or another candidate).
-        recent = await asyncio.to_thread(db.recent_posted_stories, market)
+        # All channels' recent titles (articles route across channels by topic).
+        recent = await asyncio.to_thread(db.recent_posted_stories, None)
         classifications = await asyncio.to_thread(
             analysis.classify_batch, candidates, recent
         )
@@ -117,12 +118,20 @@ async def poll_market(bot, market: str):
                     f"'{article['title'][:60]}' to {final_impact} — not posting"
                 )
                 continue
+
+            # Route to the channel matching the article's actual topic, not the
+            # feed it came from (so e.g. a crypto story from an Indonesian feed
+            # lands in the crypto channel). Fall back to the fetch market.
+            target_market = cls.get("market") or market
+            target_channel = bot.get_channel(config.CHANNELS.get(target_market, 0)) or channel
             try:
-                await channel.send(embed=publisher.build_news_embed(article, result))
+                await target_channel.send(embed=publisher.build_news_embed(article, result))
                 posted += 1
+                if target_market != market:
+                    print(f"[scheduler] {market} -> {target_market}: {article['title'][:60]}")
                 # Remember what we posted so other outlets' copies of the same
                 # story get flagged as duplicates in future polls.
-                db.add_posted_story(article["title"], market)
+                db.add_posted_story(article["title"], target_market)
             except Exception as e:  # noqa: BLE001
                 print(f"[scheduler] send failed for {market}: {e}")
 
