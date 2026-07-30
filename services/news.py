@@ -54,10 +54,11 @@ RSS_FEEDS = {
         "https://watcher.guru/news/category/brics/feed",
     ],
     "id": [
-        # CNBC Indonesia 403s from datacenter IPs and Kontan's feed went empty,
-        # so both were replaced with these.
+        # Several Indonesian outlets block or ignore datacenter IPs (CNBC
+        # Indonesia 403s, Detik times out), so they can't be used from the VPS.
+        # Bloomberg Technoz works; Google News RSS (globally reachable) fills the
+        # rest. Test any new outlet feed FROM the droplet before adding it.
         "https://www.bloombergtechnoz.com/rss",
-        "https://finance.detik.com/rss",
         "https://id.investing.com/rss/news.rss",
     ],
     "crypto": [
