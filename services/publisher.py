@@ -41,7 +41,7 @@ def build_price_embed(p: dict) -> discord.Embed:
 
 
 def build_news_embed(article: dict, analysis: dict, jev: dict = None,
-                     trigger: str = None) -> discord.Embed:
+                     trigger: str = None, routed_by: str = None) -> discord.Embed:
     sentiment = (analysis.get("sentiment") or "neutral").lower()
     embed = discord.Embed(
         title=article["title"][:256],
@@ -65,11 +65,20 @@ def build_news_embed(article: dict, analysis: dict, jev: dict = None,
     tickers = analysis.get("tickers") or []
     if tickers:
         embed.add_field(name="Tickers", value=", ".join(tickers[:8]), inline=True)
-    if analysis.get("rationale"):
-        embed.add_field(name="Why it matters", value=analysis["rationale"][:1024], inline=False)
+    market_impact = analysis.get("market_impact") or analysis.get("rationale")
+    if market_impact:
+        embed.add_field(name="How it impacts the market", value=market_impact[:1024], inline=False)
     footer = f"{article.get('source', '')} • Not financial advice"
     if trigger is not None:
-        footer = f"{article.get('source', '')} • Posted by: {trigger} • Not financial advice"
+        # Show how the channel was chosen, so Jev's routing can be judged.
+        if routed_by == "jev" and jev:
+            routing = f" • Channel: {jev['market']} (jev {jev['market_confidence']:.2f})"
+        else:
+            routing = " • Channel: feed fallback"
+        footer = (
+            f"{article.get('source', '')} • Posted by: {trigger}{routing}"
+            " • Not financial advice"
+        )
     embed.set_footer(text=footer)
     return embed
 

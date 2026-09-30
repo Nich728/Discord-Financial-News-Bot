@@ -19,7 +19,7 @@ from discord.ext import commands
 
 import config
 from scheduler import setup_scheduler
-from services import analysis, news, prices, publisher, technical
+from services import analysis, market_context, news, prices, publisher, technical
 from storage import db
 
 
@@ -103,9 +103,10 @@ async def news_cmd(interaction: discord.Interaction, market: app_commands.Choice
     if not articles:
         await interaction.followup.send("No news found right now — try again shortly.")
         return
+    market_ctx = await asyncio.to_thread(market_context.build_context)
     sent = 0
     for article in articles[:3]:
-        result = await asyncio.to_thread(analysis.analyze_article, article)
+        result = await asyncio.to_thread(analysis.analyze_article, article, market_ctx)
         if result is None:
             continue  # analysis unavailable (e.g. API overloaded) — skip it
         await interaction.followup.send(embed=publisher.build_news_embed(article, result))

@@ -40,6 +40,27 @@ if Choice is not None:
         },
     )
 
+# Which channel an article belongs to. Mirrors the Haiku routing rules.
+_MARKET_QUESTION = None
+if Choice is not None:
+    _MARKET_QUESTION = Choice(
+        instructions="Which market is this news primarily about?",
+        criteria={
+            "us": "US stocks or markets, the Federal Reserve, US economic data, or US companies.",
+            "id": (
+                "Indonesian stocks or economy: IHSG, the rupiah, Bank Indonesia, "
+                "Indonesian government economic policy, or Indonesian companies."
+            ),
+            "crypto": "Cryptocurrency, bitcoin, ethereum, stablecoins, or crypto markets and exchanges.",
+            "global": (
+                "International news that moves markets but is not mainly about the US, "
+                "Indonesia, or crypto: geopolitics (war, sanctions), oil/OPEC and "
+                "commodities, other economies (China, Europe, Japan), global trade "
+                "and tariffs, or BRICS."
+            ),
+        },
+    )
+
 _client = None
 
 
@@ -55,8 +76,11 @@ def _get_client():
     return _client
 
 
-def classify_impact(article: dict):
-    """Return {"impact": "high"|"medium"|"low", "confidence": float} or None."""
+def classify(article: dict):
+    """Rate impact AND pick the market (channel) in one Jev call.
+
+    Returns {"impact", "confidence", "market", "market_confidence"} or None.
+    """
     if not enabled():
         return None
     state = {
@@ -65,11 +89,24 @@ def classify_impact(article: dict):
         "source": article.get("source", ""),
     }
     try:
+        # Both questions go in one request; Jev evaluates them in parallel.
         response = _get_client().system_one(
-            state=state, questions={"impact": _IMPACT_QUESTION}
+            state=state,
+            questions={"impact": _IMPACT_QUESTION, "market": _MARKET_QUESTION},
         )
-        answer = response.choices["impact"]
-        return {"impact": answer.choice, "confidence": float(answer.confidence)}
+        impact = response.choices["impact"]
+        market = response.choices["market"]
+        return {
+            "impact": impact.choice,
+            "confidence": float(impact.confidence),
+            "market": market.choice,
+            "market_confidence": float(market.confidence),
+        }
     except Exception as e:  # noqa: BLE001 - Jev is optional; never break a poll
         print(f"[jev] classify failed: {type(e).__name__}: {e}")
         return None
+
+
+def classify_impact(article: dict):
+    """Backwards-compatible alias (used by the smoke-test command)."""
+    return classify(article)
