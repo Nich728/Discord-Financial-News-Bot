@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
-from services import analysis, jev, news, prefilter, publisher
+from services import analysis, jev, market_context, news, prefilter, publisher
 from storage import db
 
 IMPACT_RANK = {"low": 1, "medium": 2, "high": 3}
@@ -64,6 +64,7 @@ async def poll_market(bot, market: str):
     summarized = 0
     duplicates = 0
     jev_only = 0  # posts that only Jev (not Haiku) rated at/above the bar
+    market_ctx = None  # live snapshot, fetched lazily on the first Stage 2 call
     if candidates:
         # Stage 1: ONE cheap batched call rates all candidates and flags
         # articles covering a story we already posted (or another candidate).
@@ -103,7 +104,7 @@ async def poll_market(bot, market: str):
 
             # Jev shadow trial: rate every non-duplicate candidate with Jev too,
             # so articles only Jev rates highly still get a chance to post.
-            jev_result = await asyncio.to_thread(jev.classify_impact, article)
+            jev_result = await asyncio.to_thread(jev.classify, article)
             jev_hit = (
                 jev_result is not None
                 and IMPACT_RANK.get(jev_result["impact"], 1) >= bar
@@ -113,7 +114,11 @@ async def poll_market(bot, market: str):
             if IMPACT_RANK.get(impact, 1) < bar and not jev_hit:
                 continue
             summarized += 1
-            result = await asyncio.to_thread(analysis.analyze_article, article)
+            if market_ctx is None:
+                market_ctx = await asyncio.to_thread(market_context.build_context)
+            result = await asyncio.to_thread(
+                analysis.analyze_article, article, market_ctx
+            )
             if result is None:
                 continue  # summary failed — skip rather than post a stub
 
@@ -137,13 +142,20 @@ async def poll_market(bot, market: str):
             # Route to the channel matching the article's actual topic, not the
             # feed it came from (so e.g. a crypto story from an Indonesian feed
             # lands in the crypto channel). Fall back to the fetch market.
-            target_market = cls.get("market") or market
+            # Jev alone decides the channel (Haiku no longer routes). If Jev
+            # is unavailable, fall back to the feed's own market.
+            jev_market = jev_result.get("market") if jev_result else None
+            if jev_market in config.CHANNELS:
+                target_market, routed_by = jev_market, "jev"
+            else:
+                target_market, routed_by = market, "feed"
             target_channel = bot.get_channel(config.CHANNELS.get(target_market, 0)) or channel
             try:
                 await target_channel.send(
                     embed=publisher.build_news_embed(
                         article, result, jev=jev_result,
                         trigger=trigger if jev.enabled() else None,
+                        routed_by=routed_by,
                     )
                 )
                 posted += 1

@@ -22,7 +22,11 @@ SYSTEM = (
     "market-moving events. You are informational only and never give financial advice."
 )
 
-_PROMPT = """Headline: {title}
+_PROMPT = """{context}
+
+---
+
+Headline: {title}
 Source: {source}
 Snippet: {description}
 Market: {market}
@@ -46,14 +50,20 @@ Respond with ONLY a JSON object (no prose, no code fences) with these keys:
 - "sentiment": one of "bullish", "bearish", "neutral"
 - "impact": one of "high", "medium", "low" (follow the guide above strictly)
 - "tickers": array of affected ticker symbols (may be empty)
-- "rationale": one sentence on why this moves the asset or sector"""
+- "market_impact": at most 3 sentences on how this news is likely to affect
+  markets GIVEN THE CURRENT CONDITIONS in the snapshot above. Start with the
+  effect itself; do not restate the news (the summary already does). Name the assets or sectors
+  most affected, the likely direction, and the mechanism (e.g. interest rates,
+  the dollar or rupiah, risk appetite, commodity prices, capital flows). Cite
+  figures from the snapshot where they matter, but never invent figures that
+  are not in it. Describe likely effects only; do not give buy or sell advice."""
 
 _DEFAULT = {
     "summary": "",
     "sentiment": "neutral",
     "impact": "low",
     "tickers": [],
-    "rationale": "",
+    "market_impact": "",
 }
 
 
@@ -74,13 +84,17 @@ def _parse(text: str) -> dict:
     return {**_DEFAULT, "summary": text[:400]}
 
 
-def analyze_article(article: dict):
+def analyze_article(article: dict, context: str = ""):
     """Stage 2 / on-demand: full summary + impact for a single article.
 
-    Returns None if the API call failed, so callers can skip rather than post
-    a degraded embed.
+    `context` is the live market snapshot (services/market_context.py) used for
+    the market_impact field. Returns None if the API call failed, so callers
+    can skip rather than post a degraded embed.
     """
     prompt = _PROMPT.format(
+        context=context
+        or "Market snapshot: unavailable. Reason from the news alone and do "
+        "not state current price or yield levels.",
         title=article.get("title", ""),
         source=article.get("source", ""),
         description=article.get("description", "") or "(no snippet)",
@@ -89,7 +103,7 @@ def analyze_article(article: dict):
     try:
         resp = _client.messages.create(
             model=config.ANALYSIS_MODEL,
-            max_tokens=400,
+            max_tokens=600,  # room for the 2-3 sentence market_impact
             system=SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -119,8 +133,7 @@ def _parse_classifications(text: str, n: int):
     """
     text = text.strip()
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
-    # market defaults to None -> caller keeps the fetch market.
-    results = [{"impact": "high", "duplicate": False, "market": None} for _ in range(n)]
+    results = [{"impact": "high", "duplicate": False} for _ in range(n)]
     raw = text
     if not raw.startswith("["):
         match = re.search(r"\[.*\]", text, re.DOTALL)
@@ -140,9 +153,6 @@ def _parse_classifications(text: str, n: int):
             if impact in ("high", "medium", "low"):
                 results[i]["impact"] = impact
             results[i]["duplicate"] = bool(obj.get("duplicate", False))
-            mkt = (obj.get("market") or "").lower()
-            if mkt in ("us", "id", "crypto", "global"):
-                results[i]["market"] = mkt
     return results
 
 
@@ -196,21 +206,13 @@ def classify_batch(articles: list, recent_titles: list = None):
         "underlying event/story as (a) one of the already-posted stories above, "
         "or (b) a LOWER-numbered headline in this batch. Different angles on "
         "the same event still count as duplicates.\n\n"
-        'Also set "market" to the topic each headline belongs to:\n'
-        '- "us": US stocks/markets, the Fed, US economic data, or US companies.\n'
-        '- "id": Indonesian stocks/economy — IHSG, rupiah, Bank Indonesia, or '
-        "Indonesian companies.\n"
-        '- "crypto": cryptocurrency, bitcoin, ethereum, or crypto markets.\n'
-        '- "global": international/world news that moves markets but does not '
-        "belong to the above — geopolitics (war, sanctions), oil/OPEC/commodities, "
-        "other economies (China, Europe, Japan), global trade/tariffs, or BRICS.\n\n"
         "Respond with ONLY a JSON array, one object per headline, reusing the "
-        'same indices: [{"index": 0, "impact": "low", "duplicate": false, "market": "id"}, ...]'
+        'same indices: [{"index": 0, "impact": "low", "duplicate": false}, ...]'
     )
     try:
         resp = _client.messages.create(
             model=config.ANALYSIS_MODEL,
-            max_tokens=20 + 30 * len(articles),
+            max_tokens=20 + 25 * len(articles),
             system=_CLASSIFY_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
         )
