@@ -42,6 +42,11 @@ DB_PATH = os.getenv("DB_PATH", "bot.db")
 # without IPv6) where some feeds resolve to IPv6 first and fail to connect.
 FORCE_IPV4 = os.getenv("FORCE_IPV4", "false").lower() in ("1", "true", "yes")
 
+# Jev (TypeSafe) shadow trial: rate each candidate with Jev alongside Haiku and
+# post if EITHER says it clears the bar. Needs TYPESAFE_API_KEY in .env and
+# Python >= 3.10 (for typesafe-sdk). Set false to go back to Haiku alone.
+JEV_ENABLED = os.getenv("JEV_ENABLED", "true").lower() in ("1", "true", "yes")
+
 # ---- Gate audit (QA: catch important articles the keyword gate dropped) ----
 # When true, gate-dropped articles ALSO get classified so the bot warns you if
 # any were actually high-impact (i.e. a keyword is missing). Costs extra LLM

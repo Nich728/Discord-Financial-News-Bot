@@ -40,7 +40,8 @@ def build_price_embed(p: dict) -> discord.Embed:
     return embed
 
 
-def build_news_embed(article: dict, analysis: dict) -> discord.Embed:
+def build_news_embed(article: dict, analysis: dict, jev: dict = None,
+                     trigger: str = None) -> discord.Embed:
     sentiment = (analysis.get("sentiment") or "neutral").lower()
     embed = discord.Embed(
         title=article["title"][:256],
@@ -49,13 +50,27 @@ def build_news_embed(article: dict, analysis: dict) -> discord.Embed:
         color=SENTIMENT_COLORS.get(sentiment, 0x95A5A6),
     )
     embed.add_field(name="Sentiment", value=sentiment.title(), inline=True)
-    embed.add_field(name="Impact", value=(analysis.get("impact") or "?").title(), inline=True)
+    haiku_impact = (analysis.get("impact") or "?").lower()
+    if trigger is None:
+        embed.add_field(name="Impact", value=haiku_impact.title(), inline=True)
+    else:
+        # Jev shadow trial: show both verdicts side by side for comparison.
+        embed.add_field(name="Impact (Haiku)", value=haiku_impact.title(), inline=True)
+        if jev:
+            mark = "✅" if jev["impact"] == haiku_impact else "⚠️"
+            jev_value = f"{jev['impact'].title()} ({jev['confidence']:.2f}) {mark}"
+        else:
+            jev_value = "unavailable"
+        embed.add_field(name="Impact (Jev)", value=jev_value, inline=True)
     tickers = analysis.get("tickers") or []
     if tickers:
         embed.add_field(name="Tickers", value=", ".join(tickers[:8]), inline=True)
     if analysis.get("rationale"):
         embed.add_field(name="Why it matters", value=analysis["rationale"][:1024], inline=False)
-    embed.set_footer(text=f"{article.get('source', '')} • Not financial advice")
+    footer = f"{article.get('source', '')} • Not financial advice"
+    if trigger is not None:
+        footer = f"{article.get('source', '')} • Posted by: {trigger} • Not financial advice"
+    embed.set_footer(text=footer)
     return embed
 
 
