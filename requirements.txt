@@ -6,3 +6,4 @@ httpx>=0.27
 APScheduler>=3.10
 python-dotenv>=1.0
 tradingview-ta>=3.3
+typesafe-sdk>=0.7.2 ; python_version >= "3.10"

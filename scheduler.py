@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
-from services import analysis, news, prefilter, publisher
+from services import analysis, jev, news, prefilter, publisher
 from storage import db
 
 IMPACT_RANK = {"low": 1, "medium": 2, "high": 3}
@@ -63,6 +63,7 @@ async def poll_market(bot, market: str):
     posted = 0
     summarized = 0
     duplicates = 0
+    jev_only = 0  # posts that only Jev (not Haiku) rated at/above the bar
     if candidates:
         # Stage 1: ONE cheap batched call rates all candidates and flags
         # articles covering a story we already posted (or another candidate).
@@ -99,25 +100,39 @@ async def poll_market(bot, market: str):
                 continue
             # Trusted sources post at a lower impact bar than everyone else.
             bar = trusted_rank if article.get("trusted") else min_rank
+
+            # Jev shadow trial: rate every non-duplicate candidate with Jev too,
+            # so articles only Jev rates highly still get a chance to post.
+            jev_result = await asyncio.to_thread(jev.classify_impact, article)
+            jev_hit = (
+                jev_result is not None
+                and IMPACT_RANK.get(jev_result["impact"], 1) >= bar
+            )
+
             impact = cls.get("impact", "low")
-            if IMPACT_RANK.get(impact, 1) < bar:
+            if IMPACT_RANK.get(impact, 1) < bar and not jev_hit:
                 continue
             summarized += 1
             result = await asyncio.to_thread(analysis.analyze_article, article)
             if result is None:
                 continue  # summary failed — skip rather than post a stub
 
-            # Stage 2 gets the full article context, so treat it as the
-            # authoritative verdict. If it disagrees with stage 1, don't post —
-            # this catches stage-1 false positives and keeps the displayed
-            # impact consistent with the rationale shown next to it.
+            # Stage 2 (Haiku, full context) is Haiku's final verdict. Post if
+            # EITHER Haiku's final verdict or Jev clears the bar.
             final_impact = (result.get("impact") or "low").lower()
-            if IMPACT_RANK.get(final_impact, 1) < bar:
+            haiku_hit = IMPACT_RANK.get(final_impact, 1) >= bar
+            if not haiku_hit and not jev_hit:
                 print(
                     f"[scheduler] {market}: stage-2 downgraded "
                     f"'{article['title'][:60]}' to {final_impact} — not posting"
                 )
                 continue
+            if haiku_hit and jev_hit:
+                trigger = "both"
+            elif haiku_hit:
+                trigger = "haiku"
+            else:
+                trigger = "jev"
 
             # Route to the channel matching the article's actual topic, not the
             # feed it came from (so e.g. a crypto story from an Indonesian feed
@@ -125,8 +140,15 @@ async def poll_market(bot, market: str):
             target_market = cls.get("market") or market
             target_channel = bot.get_channel(config.CHANNELS.get(target_market, 0)) or channel
             try:
-                await target_channel.send(embed=publisher.build_news_embed(article, result))
+                await target_channel.send(
+                    embed=publisher.build_news_embed(
+                        article, result, jev=jev_result,
+                        trigger=trigger if jev.enabled() else None,
+                    )
+                )
                 posted += 1
+                if trigger == "jev":
+                    jev_only += 1
                 if target_market != market:
                     print(f"[scheduler] {market} -> {target_market}: {article['title'][:60]}")
                 # Remember what we posted so other outlets' copies of the same
@@ -143,6 +165,7 @@ async def poll_market(bot, market: str):
         f"[scheduler] {market}: fetched {len(articles)}, "
         f"gate-dropped {len(dropped)}, classified {len(candidates)}, "
         f"duplicates {duplicates}, summarized {summarized}, posted {posted}"
+        + (f" (jev-only {jev_only})" if jev.enabled() else "")
     )
 
 
